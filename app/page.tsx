@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type StreamPhase =
   | "connecting_tools"
@@ -37,6 +37,14 @@ type GenerationStreamEvent =
       type: "error";
       error: string;
     };
+
+type TimelineTone = "info" | "success" | "warning" | "error";
+
+type TimelineItem = {
+  id: number;
+  message: string;
+  tone: TimelineTone;
+};
 
 const STORAGE_KEYS = {
   deepseekApiKey: "character-card-creator:deepseek-api-key",
@@ -100,7 +108,76 @@ function renderCodeBlock(content: string): string {
   return ["```txt", content.trim(), "```"].join("\n");
 }
 
+function toneForPhase(phase: StreamPhase): TimelineTone {
+  switch (phase) {
+    case "done":
+      return "success";
+    case "fallback":
+      return "warning";
+    case "connecting_tools":
+    case "searching_web":
+    case "generating":
+      return "info";
+    default:
+      return "info";
+  }
+}
+
+function toneClasses(tone: TimelineTone): string {
+  switch (tone) {
+    case "success":
+      return "bg-emerald-300";
+    case "warning":
+      return "bg-amber-300";
+    case "error":
+      return "bg-rose-300";
+    case "info":
+    default:
+      return "bg-indigo-300";
+  }
+}
+
+function StreamingTimeline({
+  items,
+  isActive,
+}: {
+  items: TimelineItem[];
+  isActive: boolean;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="rounded-2xl border border-white/10 bg-zinc-900/55 px-4 py-3">
+      <p className="text-[11px] uppercase tracking-[0.16em] text-zinc-400">
+        Live Timeline
+      </p>
+      <ol className="mt-3 space-y-3">
+        {items.map((item, index) => (
+          <li key={item.id} className="relative flex gap-3">
+            {index !== items.length - 1 ? (
+              <span className="absolute left-[5px] top-3 h-[calc(100%+0.6rem)] w-px bg-white/15" />
+            ) : null}
+            <span
+              className={`mt-0.5 h-3 w-3 shrink-0 rounded-full ${toneClasses(item.tone)}`}
+            />
+            <p className="min-w-0 text-xs leading-relaxed break-words text-zinc-100">
+              {item.message}
+            </p>
+          </li>
+        ))}
+      </ol>
+      {isActive ? (
+        <p className="mt-3 text-xs text-indigo-200">Streaming in progress...</p>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Home() {
+  const timelineIdRef = useRef(0);
+
   const [deepseekApiKey, setDeepseekApiKey] = useState("");
   const [exaApiKey, setExaApiKey] = useState("");
   const [characterName, setCharacterName] = useState("");
@@ -119,10 +196,36 @@ export default function Home() {
   const [openingToolNotice, setOpeningToolNotice] = useState<string | null>(
     null,
   );
-  const [cardStatus, setCardStatus] = useState<string | null>(null);
-  const [openingStatus, setOpeningStatus] = useState<string | null>(null);
-  const [cardToolActivity, setCardToolActivity] = useState<string[]>([]);
-  const [openingToolActivity, setOpeningToolActivity] = useState<string[]>([]);
+  const [cardTimeline, setCardTimeline] = useState<TimelineItem[]>([]);
+  const [openingTimeline, setOpeningTimeline] = useState<TimelineItem[]>([]);
+
+  function nextTimelineId(): number {
+    timelineIdRef.current += 1;
+    return timelineIdRef.current;
+  }
+
+  function appendCardTimeline(message: string, tone: TimelineTone = "info") {
+    setCardTimeline((current) => {
+      if (current.at(-1)?.message === message) {
+        return current;
+      }
+
+      return [...current.slice(-11), { id: nextTimelineId(), message, tone }];
+    });
+  }
+
+  function appendOpeningTimeline(
+    message: string,
+    tone: TimelineTone = "info",
+  ) {
+    setOpeningTimeline((current) => {
+      if (current.at(-1)?.message === message) {
+        return current;
+      }
+
+      return [...current.slice(-11), { id: nextTimelineId(), message, tone }];
+    });
+  }
 
   useEffect(() => {
     setDeepseekApiKey(localStorage.getItem(STORAGE_KEYS.deepseekApiKey) ?? "");
@@ -158,8 +261,13 @@ export default function Home() {
     event.preventDefault();
     setError(null);
     setCardToolNotice(null);
-    setCardToolActivity([]);
-    setCardStatus("Preparing generation...");
+    setCardTimeline([
+      {
+        id: nextTimelineId(),
+        message: "Preparing generation...",
+        tone: "info",
+      },
+    ]);
 
     if (!deepseekApiKey.trim()) {
       setError("Please provide your DeepSeek API key.");
@@ -196,7 +304,7 @@ export default function Home() {
 
       await streamNdjson(response, (eventData) => {
         if (eventData.type === "status") {
-          setCardStatus(eventData.message);
+          appendCardTimeline(eventData.message, toneForPhase(eventData.phase));
           return;
         }
 
@@ -208,12 +316,23 @@ export default function Home() {
                 ? `Received ${eventData.toolName} results.`
                 : `${eventData.toolName} returned an error.`;
 
-          setCardToolActivity((current) => [...current, toolText]);
+          appendCardTimeline(
+            toolText,
+            eventData.state === "result"
+              ? "success"
+              : eventData.state === "error"
+                ? "error"
+                : "info",
+          );
           return;
         }
 
         if (eventData.type === "reset-output") {
           setCharacterCard("");
+          appendCardTimeline(
+            "Restarted generation without tools.",
+            "warning",
+          );
           return;
         }
 
@@ -224,6 +343,7 @@ export default function Home() {
 
         if (eventData.type === "done") {
           setCharacterCard(eventData.output);
+          appendCardTimeline("Final output is ready.", "success");
 
           if (eventData.toolWarning) {
             setCardToolNotice(eventData.toolWarning);
@@ -246,17 +366,22 @@ export default function Home() {
           : "Character card generation failed.";
 
       setError(message);
+      appendCardTimeline(message, "error");
     } finally {
       setIsGeneratingCard(false);
-      setCardStatus(null);
     }
   }
 
   async function handleGenerateOpeningMessage() {
     setError(null);
     setOpeningToolNotice(null);
-    setOpeningToolActivity([]);
-    setOpeningStatus("Preparing generation...");
+    setOpeningTimeline([
+      {
+        id: nextTimelineId(),
+        message: "Preparing generation...",
+        tone: "info",
+      },
+    ]);
 
     if (!deepseekApiKey.trim()) {
       setError("Please provide your DeepSeek API key.");
@@ -298,7 +423,7 @@ export default function Home() {
 
       await streamNdjson(response, (eventData) => {
         if (eventData.type === "status") {
-          setOpeningStatus(eventData.message);
+          appendOpeningTimeline(eventData.message, toneForPhase(eventData.phase));
           return;
         }
 
@@ -310,12 +435,23 @@ export default function Home() {
                 ? `Received ${eventData.toolName} results.`
                 : `${eventData.toolName} returned an error.`;
 
-          setOpeningToolActivity((current) => [...current, toolText]);
+          appendOpeningTimeline(
+            toolText,
+            eventData.state === "result"
+              ? "success"
+              : eventData.state === "error"
+                ? "error"
+                : "info",
+          );
           return;
         }
 
         if (eventData.type === "reset-output") {
           setOpeningMessage("");
+          appendOpeningTimeline(
+            "Restarted generation without tools.",
+            "warning",
+          );
           return;
         }
 
@@ -326,6 +462,7 @@ export default function Home() {
 
         if (eventData.type === "done") {
           setOpeningMessage(eventData.output);
+          appendOpeningTimeline("Final output is ready.", "success");
 
           if (eventData.toolWarning) {
             setOpeningToolNotice(eventData.toolWarning);
@@ -350,9 +487,9 @@ export default function Home() {
           : "Opening message generation failed.";
 
       setError(message);
+      appendOpeningTimeline(message, "error");
     } finally {
       setIsGeneratingOpening(false);
-      setOpeningStatus(null);
     }
   }
 
@@ -472,17 +609,10 @@ export default function Home() {
                 : "Generate Character Card"}
             </button>
 
-            {cardStatus ? (
-              <p className="rounded-xl border border-indigo-300/20 bg-indigo-950/35 px-3 py-2 text-xs text-indigo-100">
-                {cardStatus}
-              </p>
-            ) : null}
-
-            {cardToolActivity.length > 0 ? (
-              <div className="rounded-xl border border-white/10 bg-zinc-900/55 px-3 py-2 text-xs text-zinc-200">
-                {cardToolActivity.slice(-4).join(" · ")}
-              </div>
-            ) : null}
+            <StreamingTimeline
+              items={cardTimeline}
+              isActive={isGeneratingCard}
+            />
           </form>
 
           {cardToolNotice ? (
@@ -543,17 +673,12 @@ export default function Home() {
               : "Generate Opening Message"}
           </button>
 
-          {openingStatus ? (
-            <p className="mt-4 rounded-xl border border-indigo-300/20 bg-indigo-950/35 px-3 py-2 text-xs text-indigo-100">
-              {openingStatus}
-            </p>
-          ) : null}
-
-          {openingToolActivity.length > 0 ? (
-            <div className="mt-4 rounded-xl border border-white/10 bg-zinc-900/55 px-3 py-2 text-xs text-zinc-200">
-              {openingToolActivity.slice(-4).join(" · ")}
-            </div>
-          ) : null}
+          <div className="mt-4">
+            <StreamingTimeline
+              items={openingTimeline}
+              isActive={isGeneratingOpening}
+            />
+          </div>
 
           {openingToolNotice ? (
             <p className="mt-5 rounded-xl border border-emerald-400/20 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
