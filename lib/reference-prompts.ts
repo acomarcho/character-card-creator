@@ -22,6 +22,9 @@ export function buildCharacterCardSystemPrompt(): string {
     "4) Keep placeholders like {{char}} and {{user}} exactly as placeholders when relevant.",
     "5) If web search tools are available, use them to verify core canon facts before finalizing.",
     "6) Keep the final result coherent and internally consistent for roleplay.",
+    "7) The very first character of your response must be '<' from the opening <setting> tag.",
+    "8) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
+    "9) Do not mention the existence of web search, tools, or your process.",
     "",
     "One-shot reference (mirror this structure religiously):",
     characterCardReference,
@@ -54,6 +57,9 @@ export function buildOpeningMessageSystemPrompt(): string {
     "3) Match the narrative/dialogue style of the one-shot example.",
     "4) Include {{user}} naturally in the scene.",
     "5) Ground the opening in the supplied character card and requested opening context.",
+    "6) Start directly with the opening message itself; no lead-in text.",
+    "7) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
+    "8) Do not mention web search, tools, or your writing process.",
     "",
     "One-shot reference:",
     openingMessageReference,
@@ -87,4 +93,3 @@ export function stripCodeFence(text: string): string {
     .replace(/\n?```$/, "")
     .trim();
 }
-
