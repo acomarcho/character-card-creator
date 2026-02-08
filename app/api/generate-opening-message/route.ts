@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { runAgenticGeneration } from "@/lib/ai-generation";
+import { createAgenticGenerationStream } from "@/lib/ai-generation";
 import {
   buildOpeningMessageSystemPrompt,
   buildOpeningMessageUserPrompt,
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const json = await request.json();
     const payload = payloadSchema.parse(json);
 
-    const result = await runAgenticGeneration({
+    const stream = createAgenticGenerationStream({
       apiKey: payload.deepseekApiKey,
       exaApiKey: payload.exaApiKey,
       system: buildOpeningMessageSystemPrompt(),
@@ -32,12 +32,15 @@ export async function POST(request: Request) {
         characterCard: payload.characterCard,
         openingContext: payload.openingContext,
       }),
+      postProcess: stripCodeFence,
     });
 
-    return NextResponse.json({
-      openingMessage: stripCodeFence(result.text),
-      usedWebTools: result.usedWebTools,
-      toolWarning: result.toolWarning,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -56,4 +59,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

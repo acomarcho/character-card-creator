@@ -2,17 +2,41 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type CardResponse = {
-  characterCard: string;
-  usedWebTools: boolean;
-  toolWarning?: string;
-};
+type StreamPhase =
+  | "connecting_tools"
+  | "searching_web"
+  | "generating"
+  | "fallback"
+  | "done";
 
-type OpeningResponse = {
-  openingMessage: string;
-  usedWebTools: boolean;
-  toolWarning?: string;
-};
+type GenerationStreamEvent =
+  | {
+      type: "status";
+      phase: StreamPhase;
+      message: string;
+    }
+  | {
+      type: "tool";
+      state: "start" | "result" | "error";
+      toolName: string;
+    }
+  | {
+      type: "text-delta";
+      delta: string;
+    }
+  | {
+      type: "reset-output";
+    }
+  | {
+      type: "done";
+      output: string;
+      usedWebTools: boolean;
+      toolWarning?: string;
+    }
+  | {
+      type: "error";
+      error: string;
+    };
 
 const STORAGE_KEYS = {
   deepseekApiKey: "character-card-creator:deepseek-api-key",
@@ -33,6 +57,43 @@ async function parseError(response: Response): Promise<string> {
   }
 
   return "Something went wrong while contacting the generation API.";
+}
+
+async function streamNdjson(
+  response: Response,
+  onEvent: (event: GenerationStreamEvent) => void,
+): Promise<void> {
+  if (!response.body) {
+    throw new Error("Streaming response body is missing.");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+
+    if (done) {
+      break;
+    }
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      onEvent(JSON.parse(line) as GenerationStreamEvent);
+    }
+  }
+
+  if (buffer.trim()) {
+    onEvent(JSON.parse(buffer) as GenerationStreamEvent);
+  }
 }
 
 function renderCodeBlock(content: string): string {
@@ -58,6 +119,10 @@ export default function Home() {
   const [openingToolNotice, setOpeningToolNotice] = useState<string | null>(
     null,
   );
+  const [cardStatus, setCardStatus] = useState<string | null>(null);
+  const [openingStatus, setOpeningStatus] = useState<string | null>(null);
+  const [cardToolActivity, setCardToolActivity] = useState<string[]>([]);
+  const [openingToolActivity, setOpeningToolActivity] = useState<string[]>([]);
 
   useEffect(() => {
     setDeepseekApiKey(localStorage.getItem(STORAGE_KEYS.deepseekApiKey) ?? "");
@@ -93,6 +158,8 @@ export default function Home() {
     event.preventDefault();
     setError(null);
     setCardToolNotice(null);
+    setCardToolActivity([]);
+    setCardStatus("Preparing generation...");
 
     if (!deepseekApiKey.trim()) {
       setError("Please provide your DeepSeek API key.");
@@ -124,15 +191,54 @@ export default function Home() {
         throw new Error(await parseError(response));
       }
 
-      const data = (await response.json()) as CardResponse;
-      setCharacterCard(data.characterCard);
+      setCharacterCard("");
       setOpeningMessage("");
 
-      if (data.toolWarning) {
-        setCardToolNotice(data.toolWarning);
-      } else if (data.usedWebTools) {
-        setCardToolNotice("Web search tools were used for this generation.");
-      }
+      await streamNdjson(response, (eventData) => {
+        if (eventData.type === "status") {
+          setCardStatus(eventData.message);
+          return;
+        }
+
+        if (eventData.type === "tool") {
+          const toolText =
+            eventData.state === "start"
+              ? `Calling ${eventData.toolName}...`
+              : eventData.state === "result"
+                ? `Received ${eventData.toolName} results.`
+                : `${eventData.toolName} returned an error.`;
+
+          setCardToolActivity((current) => [...current, toolText]);
+          return;
+        }
+
+        if (eventData.type === "reset-output") {
+          setCharacterCard("");
+          return;
+        }
+
+        if (eventData.type === "text-delta") {
+          setCharacterCard((current) => current + eventData.delta);
+          return;
+        }
+
+        if (eventData.type === "done") {
+          setCharacterCard(eventData.output);
+
+          if (eventData.toolWarning) {
+            setCardToolNotice(eventData.toolWarning);
+          } else if (eventData.usedWebTools) {
+            setCardToolNotice("Web search tools were used for this generation.");
+          } else {
+            setCardToolNotice(null);
+          }
+          return;
+        }
+
+        if (eventData.type === "error") {
+          throw new Error(eventData.error);
+        }
+      });
     } catch (unknownError) {
       const message =
         unknownError instanceof Error
@@ -142,12 +248,15 @@ export default function Home() {
       setError(message);
     } finally {
       setIsGeneratingCard(false);
+      setCardStatus(null);
     }
   }
 
   async function handleGenerateOpeningMessage() {
     setError(null);
     setOpeningToolNotice(null);
+    setOpeningToolActivity([]);
+    setOpeningStatus("Preparing generation...");
 
     if (!deepseekApiKey.trim()) {
       setError("Please provide your DeepSeek API key.");
@@ -185,14 +294,55 @@ export default function Home() {
         throw new Error(await parseError(response));
       }
 
-      const data = (await response.json()) as OpeningResponse;
-      setOpeningMessage(data.openingMessage);
+      setOpeningMessage("");
 
-      if (data.toolWarning) {
-        setOpeningToolNotice(data.toolWarning);
-      } else if (data.usedWebTools) {
-        setOpeningToolNotice("Web search tools were used for this generation.");
-      }
+      await streamNdjson(response, (eventData) => {
+        if (eventData.type === "status") {
+          setOpeningStatus(eventData.message);
+          return;
+        }
+
+        if (eventData.type === "tool") {
+          const toolText =
+            eventData.state === "start"
+              ? `Calling ${eventData.toolName}...`
+              : eventData.state === "result"
+                ? `Received ${eventData.toolName} results.`
+                : `${eventData.toolName} returned an error.`;
+
+          setOpeningToolActivity((current) => [...current, toolText]);
+          return;
+        }
+
+        if (eventData.type === "reset-output") {
+          setOpeningMessage("");
+          return;
+        }
+
+        if (eventData.type === "text-delta") {
+          setOpeningMessage((current) => current + eventData.delta);
+          return;
+        }
+
+        if (eventData.type === "done") {
+          setOpeningMessage(eventData.output);
+
+          if (eventData.toolWarning) {
+            setOpeningToolNotice(eventData.toolWarning);
+          } else if (eventData.usedWebTools) {
+            setOpeningToolNotice(
+              "Web search tools were used for this generation.",
+            );
+          } else {
+            setOpeningToolNotice(null);
+          }
+          return;
+        }
+
+        if (eventData.type === "error") {
+          throw new Error(eventData.error);
+        }
+      });
     } catch (unknownError) {
       const message =
         unknownError instanceof Error
@@ -202,6 +352,7 @@ export default function Home() {
       setError(message);
     } finally {
       setIsGeneratingOpening(false);
+      setOpeningStatus(null);
     }
   }
 
@@ -320,6 +471,18 @@ export default function Home() {
                 ? "Generating Character Card..."
                 : "Generate Character Card"}
             </button>
+
+            {cardStatus ? (
+              <p className="rounded-xl border border-indigo-300/20 bg-indigo-950/35 px-3 py-2 text-xs text-indigo-100">
+                {cardStatus}
+              </p>
+            ) : null}
+
+            {cardToolActivity.length > 0 ? (
+              <div className="rounded-xl border border-white/10 bg-zinc-900/55 px-3 py-2 text-xs text-zinc-200">
+                {cardToolActivity.slice(-4).join(" · ")}
+              </div>
+            ) : null}
           </form>
 
           {cardToolNotice ? (
@@ -379,6 +542,18 @@ export default function Home() {
               ? "Generating Opening Message..."
               : "Generate Opening Message"}
           </button>
+
+          {openingStatus ? (
+            <p className="mt-4 rounded-xl border border-indigo-300/20 bg-indigo-950/35 px-3 py-2 text-xs text-indigo-100">
+              {openingStatus}
+            </p>
+          ) : null}
+
+          {openingToolActivity.length > 0 ? (
+            <div className="mt-4 rounded-xl border border-white/10 bg-zinc-900/55 px-3 py-2 text-xs text-zinc-200">
+              {openingToolActivity.slice(-4).join(" · ")}
+            </div>
+          ) : null}
 
           {openingToolNotice ? (
             <p className="mt-5 rounded-xl border border-emerald-400/20 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { runAgenticGeneration } from "@/lib/ai-generation";
+import { createAgenticGenerationStream } from "@/lib/ai-generation";
 import {
   buildCharacterCardSystemPrompt,
   buildCharacterCardUserPrompt,
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
     const json = await request.json();
     const payload = payloadSchema.parse(json);
 
-    const result = await runAgenticGeneration({
+    const stream = createAgenticGenerationStream({
       apiKey: payload.deepseekApiKey,
       exaApiKey: payload.exaApiKey,
       system: buildCharacterCardSystemPrompt(),
@@ -30,12 +30,15 @@ export async function POST(request: Request) {
         characterName: payload.characterName,
         characterContext: payload.characterContext,
       }),
+      postProcess: stripCodeFence,
     });
 
-    return NextResponse.json({
-      characterCard: stripCodeFence(result.text),
-      usedWebTools: result.usedWebTools,
-      toolWarning: result.toolWarning,
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
