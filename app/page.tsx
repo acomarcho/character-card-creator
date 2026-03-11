@@ -497,11 +497,23 @@ export default function Home() {
     value: string,
     field: "card" | "opening",
   ): Promise<void> {
-    if (!value.trim()) {
+    if (!value || !value.trim()) {
       return;
     }
 
-    await navigator.clipboard.writeText(value);
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      const textarea = document.createElement("textarea");
+      textarea.value = value;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+    }
+
     setCopiedField(field);
 
     window.setTimeout(() => {
