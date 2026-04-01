@@ -14,7 +14,10 @@ const payloadSchema = z.object({
   deepseekApiKey: z.string().trim().min(1, "DeepSeek API key is required."),
   exaApiKey: z.string().trim().optional(),
   characterName: z.string().trim().min(1, "Character name is required."),
-  characterCard: z.string().trim().min(1, "Generate a character card first."),
+  characterCard: z
+    .string()
+    .trim()
+    .min(1, "Generate or paste a character card first."),
   openingContext: z.string().optional(),
 });
 

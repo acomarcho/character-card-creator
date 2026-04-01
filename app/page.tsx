@@ -52,6 +52,7 @@ const STORAGE_KEYS = {
   characterName: "character-card-creator:character-name",
   characterContext: "character-card-creator:character-context",
   openingContext: "character-card-creator:opening-context",
+  characterCardManualEdit: "character-card-creator:character-card-manual-edit",
 };
 
 async function parseError(response: Response): Promise<string> {
@@ -183,6 +184,8 @@ export default function Home() {
   const [characterName, setCharacterName] = useState("");
   const [characterContext, setCharacterContext] = useState("");
   const [characterCard, setCharacterCard] = useState("");
+  const [isCharacterCardManualEdit, setIsCharacterCardManualEdit] =
+    useState(false);
   const [openingContext, setOpeningContext] = useState("");
   const [openingMessage, setOpeningMessage] = useState("");
 
@@ -234,6 +237,9 @@ export default function Home() {
     setCharacterContext(
       localStorage.getItem(STORAGE_KEYS.characterContext) ?? "",
     );
+    setIsCharacterCardManualEdit(
+      localStorage.getItem(STORAGE_KEYS.characterCardManualEdit) === "true",
+    );
     setOpeningContext(localStorage.getItem(STORAGE_KEYS.openingContext) ?? "");
   }, []);
 
@@ -252,6 +258,13 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.characterContext, characterContext);
   }, [characterContext]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEYS.characterCardManualEdit,
+      String(isCharacterCardManualEdit),
+    );
+  }, [isCharacterCardManualEdit]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.openingContext, openingContext);
@@ -394,7 +407,9 @@ export default function Home() {
     }
 
     if (!characterCard.trim()) {
-      setError("Generate a character card before generating an opening message.");
+      setError(
+        "Generate or paste a character card before generating an opening message.",
+      );
       return;
     }
 
@@ -636,23 +651,48 @@ export default function Home() {
           <div className="mt-6 space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-semibold text-zinc-100">
-                Generated Character Card
+                Character Card
               </h3>
-              <button
-                type="button"
-                onClick={() => handleCopy(characterCard, "card")}
-                disabled={!characterCard.trim()}
-                className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {copiedField === "card" ? "Copied" : "Copy to Clipboard"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-zinc-900/80 px-3 py-1 text-xs text-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={isCharacterCardManualEdit}
+                    onChange={(event) =>
+                      setIsCharacterCardManualEdit(event.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-white/20 bg-zinc-950 text-pink-400 accent-pink-400"
+                  />
+                  Manual edit
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopy(characterCard, "card")}
+                  disabled={!characterCard.trim()}
+                  className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {copiedField === "card" ? "Copied" : "Copy to Clipboard"}
+                </button>
+              </div>
             </div>
 
-            <pre className="max-h-[26rem] overflow-auto rounded-2xl border border-white/10 bg-zinc-900/95 p-4 text-xs leading-relaxed text-zinc-200 sm:text-sm">
-              {characterCard.trim()
-                ? renderCodeBlock(characterCard)
-                : "```txt\nGenerate a character card to see output here.\n```"}
-            </pre>
+            <textarea
+              value={characterCard}
+              onChange={(event) => setCharacterCard(event.target.value)}
+              readOnly={!isCharacterCardManualEdit || isGeneratingCard}
+              spellCheck={false}
+              placeholder="Generate a character card to see output here, or enable manual edit to paste one."
+              rows={16}
+              className="min-h-[26rem] w-full rounded-2xl border border-white/10 bg-zinc-900/95 p-4 font-mono text-xs leading-relaxed text-zinc-200 outline-none ring-pink-400/40 transition focus:ring read-only:cursor-default read-only:text-zinc-300/90 sm:text-sm"
+            />
+            <p className="text-xs text-zinc-400">
+              {isCharacterCardManualEdit
+                ? isGeneratingCard
+                  ? "Manual editing is temporarily locked while generation is streaming."
+                  : "Manual editing is on. You can paste an existing character card here."
+                : "Manual editing is off. This field still updates from generation and streaming events."}
+            </p>
           </div>
         </section>
 
