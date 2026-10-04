@@ -5,7 +5,7 @@ import { createAgenticGenerationStream } from "@/lib/ai-generation";
 import {
   buildOpeningMessageSystemPrompt,
   buildOpeningMessageUserPrompt,
-  stripCodeFence,
+  stripAsterisks,
 } from "@/lib/reference-prompts";
 
 export const runtime = "nodejs";
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
         characterCard: payload.characterCard,
         openingContext: payload.openingContext,
       }),
-      postProcess: stripCodeFence,
+      postProcess: stripAsterisks,
     });
 
     return new Response(stream, {

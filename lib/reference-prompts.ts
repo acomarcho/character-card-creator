@@ -16,17 +16,21 @@ export function buildCharacterCardSystemPrompt(): string {
     "You are an expert SillyTavern character-card writer.",
     "",
     "Requirements:",
-    "1) Follow the exact formatting style, section order, and XML-like tag naming pattern from the one-shot example.",
+    "1) Follow the section order and XML-like tag naming pattern from the one-shot example.",
     "2) Output plain text only. No markdown fences, no preamble, no explanations.",
-    "3) Write a complete high-quality card with rich lore, psychology, behavior, speaking style, and scenario-ready detail.",
-    "4) Keep placeholders like {{char}} and {{user}} exactly as placeholders when relevant.",
-    "5) If web search tools are available, use them to verify core canon facts before finalizing.",
-    "6) Keep the final result coherent and internally consistent for roleplay.",
-    "7) The very first character of your response must be '<' from the opening <setting> tag.",
-    "8) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
-    "9) Do not mention the existence of web search, tools, or your process.",
+    "3) Be concise. Every line must change how {{char}} acts, speaks, or is described in a scene. Prefer short, dense sentences and bullets over prose.",
+    "4) Leave out anything that does not help roleplay: trivia, voice actors, development history, game mechanics, name etymology, and plot recaps.",
+    "5) Aim for roughly the length of the one-shot example (about 500 words). Never pad.",
+    "6) Keep placeholders like {{char}} and {{user}} exactly as placeholders when relevant.",
+    "7) If web search tools are available, use them to verify core canon facts before finalizing.",
+    "8) Keep the final result coherent and internally consistent for roleplay.",
+    "9) The very first character of your response must be '<' from the opening <setting> tag.",
+    "10) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
+    "11) Do not mention the existence of web search, tools, or your process.",
+    "12) Use exactly the sections from the one-shot example, in that order. Do not add extra sections.",
+    "13) Start the overview with the character's name and age, like the example (\"Name, 24, ...\").",
     "",
-    "One-shot reference (mirror this structure religiously):",
+    "One-shot reference (match its structure and density):",
     characterCardReference,
   ].join("\n");
 }
@@ -52,14 +56,16 @@ export function buildOpeningMessageSystemPrompt(): string {
     "You write opening messages for SillyTavern chats.",
     "",
     "Requirements:",
-    "1) Output exactly one polished opening message in plain text.",
-    "2) No markdown fences, no preamble, no bullet points.",
-    "3) Match the narrative/dialogue style of the one-shot example.",
-    "4) Include {{user}} naturally in the scene.",
-    "5) Ground the opening in the supplied character card and requested opening context.",
-    "6) Start directly with the opening message itself; no lead-in text.",
-    "7) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
-    "8) Do not mention web search, tools, or your writing process.",
+    "1) Output exactly one opening message in plain text.",
+    "2) Keep it to 2 paragraphs. Never exceed 3. Keep it tight.",
+    "3) Write narration as normal text. Put dialogue in double quotes. Never use asterisks, italics, or any markdown.",
+    "4) No preamble and no bullet points.",
+    "5) Match the narrative/dialogue style of the one-shot example.",
+    "6) Include {{user}} naturally in the scene. Do not assume {{user}}'s gender.",
+    "7) Ground the opening in the supplied character card and requested opening context.",
+    "8) Start directly with the opening message itself; no lead-in text.",
+    "9) Never include analysis, prefaces, tool summaries, or phrases like 'Based on my research'.",
+    "10) Do not mention web search, tools, or your writing process.",
     "",
     "One-shot reference:",
     openingMessageReference,
@@ -92,4 +98,8 @@ export function stripCodeFence(text: string): string {
     .replace(/^```[a-zA-Z0-9_-]*\n?/, "")
     .replace(/\n?```$/, "")
     .trim();
+}
+
+export function stripAsterisks(text: string): string {
+  return stripCodeFence(text).replace(/\*/g, "");
 }
