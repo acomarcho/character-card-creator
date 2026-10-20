@@ -67,7 +67,7 @@ function buildExaMcpUrl(exaApiKey?: string): string {
   return url.toString();
 }
 
-function toErrorMessage(error: unknown): string {
+export function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
   }

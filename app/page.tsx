@@ -53,6 +53,7 @@ const STORAGE_KEYS = {
   characterContext: "character-card-creator:character-context",
   openingContext: "character-card-creator:opening-context",
   characterCardManualEdit: "character-card-creator:character-card-manual-edit",
+  openingMessageManualEdit: "character-card-creator:opening-message-manual-edit",
 };
 
 async function parseError(response: Response): Promise<string> {
@@ -103,10 +104,6 @@ async function streamNdjson(
   if (buffer.trim()) {
     onEvent(JSON.parse(buffer) as GenerationStreamEvent);
   }
-}
-
-function renderCodeBlock(content: string): string {
-  return ["```txt", content.trim(), "```"].join("\n");
 }
 
 function toneForPhase(phase: StreamPhase): TimelineTone {
@@ -170,7 +167,7 @@ function StreamingTimeline({
         ))}
       </ol>
       {isActive ? (
-        <p className="mt-3 text-xs text-indigo-200">Streaming in progress...</p>
+        <p className="mt-3 text-xs text-indigo-200">Working...</p>
       ) : null}
     </div>
   );
@@ -188,9 +185,17 @@ export default function Home() {
     useState(false);
   const [openingContext, setOpeningContext] = useState("");
   const [openingMessage, setOpeningMessage] = useState("");
+  const [isOpeningMessageManualEdit, setIsOpeningMessageManualEdit] =
+    useState(false);
+  const [cardEditInstruction, setCardEditInstruction] = useState("");
+  const [openingEditInstruction, setOpeningEditInstruction] = useState("");
 
   const [isGeneratingCard, setIsGeneratingCard] = useState(false);
   const [isGeneratingOpening, setIsGeneratingOpening] = useState(false);
+  const [isEditingCard, setIsEditingCard] = useState(false);
+  const [isEditingOpening, setIsEditingOpening] = useState(false);
+  const [cardUndo, setCardUndo] = useState<string | null>(null);
+  const [openingUndo, setOpeningUndo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copiedField, setCopiedField] = useState<"card" | "opening" | null>(
     null,
@@ -240,6 +245,9 @@ export default function Home() {
     setIsCharacterCardManualEdit(
       localStorage.getItem(STORAGE_KEYS.characterCardManualEdit) === "true",
     );
+    setIsOpeningMessageManualEdit(
+      localStorage.getItem(STORAGE_KEYS.openingMessageManualEdit) === "true",
+    );
     setOpeningContext(localStorage.getItem(STORAGE_KEYS.openingContext) ?? "");
   }, []);
 
@@ -270,8 +278,20 @@ export default function Home() {
     localStorage.setItem(STORAGE_KEYS.openingContext, openingContext);
   }, [openingContext]);
 
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEYS.openingMessageManualEdit,
+      String(isOpeningMessageManualEdit),
+    );
+  }, [isOpeningMessageManualEdit]);
+
   async function handleGenerateCard(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    if (isEditingCard || isEditingOpening) {
+      return;
+    }
+
     setError(null);
     setCardToolNotice(null);
     setCardTimeline([
@@ -314,6 +334,8 @@ export default function Home() {
 
       setCharacterCard("");
       setOpeningMessage("");
+      setCardUndo(null);
+      setOpeningUndo(null);
 
       await streamNdjson(response, (eventData) => {
         if (eventData.type === "status") {
@@ -386,6 +408,10 @@ export default function Home() {
   }
 
   async function handleGenerateOpeningMessage() {
+    if (isEditingCard || isEditingOpening) {
+      return;
+    }
+
     setError(null);
     setOpeningToolNotice(null);
     setOpeningTimeline([
@@ -435,6 +461,7 @@ export default function Home() {
       }
 
       setOpeningMessage("");
+      setOpeningUndo(null);
 
       await streamNdjson(response, (eventData) => {
         if (eventData.type === "status") {
@@ -508,6 +535,179 @@ export default function Home() {
     }
   }
 
+  async function handleEditCard(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+
+    const base = characterCard;
+
+    if (!deepseekApiKey.trim()) {
+      setError("Please provide your DeepSeek API key.");
+      return;
+    }
+
+    if (!base.trim()) {
+      setError("Add or generate a character card before editing.");
+      return;
+    }
+
+    if (!cardEditInstruction.trim()) {
+      setError("Describe the edit you want to make.");
+      return;
+    }
+
+    appendCardTimeline("Preparing edit...", "info");
+    setIsEditingCard(true);
+
+    try {
+      const response = await fetch("/api/edit-content", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deepseekApiKey,
+          target: "character-card",
+          content: base,
+          instruction: cardEditInstruction,
+          characterName,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseError(response));
+      }
+
+      await streamNdjson(response, (eventData) => {
+        if (eventData.type === "status") {
+          appendCardTimeline(eventData.message, toneForPhase(eventData.phase));
+          return;
+        }
+
+        if (eventData.type === "done") {
+          setCharacterCard(eventData.output);
+          setCardUndo(base);
+          setCardEditInstruction("");
+          appendCardTimeline("Edit applied.", "success");
+          return;
+        }
+
+        if (eventData.type === "error") {
+          throw new Error(eventData.error);
+        }
+      });
+    } catch (unknownError) {
+      const message =
+        unknownError instanceof Error ? unknownError.message : "Edit failed.";
+
+      setError(message);
+      appendCardTimeline(message, "error");
+    } finally {
+      setIsEditingCard(false);
+    }
+  }
+
+  async function handleEditOpening(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (isGeneratingCard || isEditingCard) {
+      return;
+    }
+
+    setError(null);
+
+    const base = openingMessage;
+
+    if (!deepseekApiKey.trim()) {
+      setError("Please provide your DeepSeek API key.");
+      return;
+    }
+
+    if (!base.trim()) {
+      setError("Generate or paste an opening message before editing.");
+      return;
+    }
+
+    if (!openingEditInstruction.trim()) {
+      setError("Describe the edit you want to make.");
+      return;
+    }
+
+    appendOpeningTimeline("Preparing edit...", "info");
+    setIsEditingOpening(true);
+
+    try {
+      const response = await fetch("/api/edit-content", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          deepseekApiKey,
+          target: "opening-message",
+          content: base,
+          instruction: openingEditInstruction,
+          characterName,
+          characterCard,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(await parseError(response));
+      }
+
+      await streamNdjson(response, (eventData) => {
+        if (eventData.type === "status") {
+          appendOpeningTimeline(
+            eventData.message,
+            toneForPhase(eventData.phase),
+          );
+          return;
+        }
+
+        if (eventData.type === "done") {
+          setOpeningMessage(eventData.output);
+          setOpeningUndo(base);
+          setOpeningEditInstruction("");
+          appendOpeningTimeline("Edit applied.", "success");
+          return;
+        }
+
+        if (eventData.type === "error") {
+          throw new Error(eventData.error);
+        }
+      });
+    } catch (unknownError) {
+      const message =
+        unknownError instanceof Error ? unknownError.message : "Edit failed.";
+
+      setError(message);
+      appendOpeningTimeline(message, "error");
+    } finally {
+      setIsEditingOpening(false);
+    }
+  }
+
+  function handleUndoCard() {
+    if (cardUndo === null) {
+      return;
+    }
+
+    setCharacterCard(cardUndo);
+    setCardUndo(null);
+    appendCardTimeline("Reverted the last AI edit.", "warning");
+  }
+
+  function handleUndoOpening() {
+    if (openingUndo === null) {
+      return;
+    }
+
+    setOpeningMessage(openingUndo);
+    setOpeningUndo(null);
+    appendOpeningTimeline("Reverted the last AI edit.", "warning");
+  }
+
   async function handleCopy(
     value: string,
     field: "card" | "opening",
@@ -537,16 +737,72 @@ export default function Home() {
   }
 
   const canGenerateCard = useMemo(
-    () => Boolean(deepseekApiKey.trim() && characterName.trim()),
-    [deepseekApiKey, characterName],
+    () =>
+      Boolean(
+        deepseekApiKey.trim() &&
+          characterName.trim() &&
+          !isEditingCard &&
+          !isEditingOpening,
+      ),
+    [deepseekApiKey, characterName, isEditingCard, isEditingOpening],
   );
 
   const canGenerateOpening = useMemo(
     () =>
       Boolean(
-        deepseekApiKey.trim() && characterName.trim() && characterCard.trim(),
+        deepseekApiKey.trim() &&
+          characterName.trim() &&
+          characterCard.trim() &&
+          !isEditingCard &&
+          !isEditingOpening,
       ),
-    [deepseekApiKey, characterName, characterCard],
+    [
+      deepseekApiKey,
+      characterName,
+      characterCard,
+      isEditingCard,
+      isEditingOpening,
+    ],
+  );
+
+  const canEditCard = useMemo(
+    () =>
+      Boolean(
+        deepseekApiKey.trim() &&
+          characterCard.trim() &&
+          cardEditInstruction.trim() &&
+          !isGeneratingCard &&
+          !isEditingCard,
+      ),
+    [
+      deepseekApiKey,
+      characterCard,
+      cardEditInstruction,
+      isGeneratingCard,
+      isEditingCard,
+    ],
+  );
+
+  const canEditOpening = useMemo(
+    () =>
+      Boolean(
+        deepseekApiKey.trim() &&
+          openingMessage.trim() &&
+          openingEditInstruction.trim() &&
+          !isGeneratingCard &&
+          !isGeneratingOpening &&
+          !isEditingCard &&
+          !isEditingOpening,
+      ),
+    [
+      deepseekApiKey,
+      openingMessage,
+      openingEditInstruction,
+      isGeneratingCard,
+      isGeneratingOpening,
+      isEditingCard,
+      isEditingOpening,
+    ],
   );
 
   return (
@@ -638,7 +894,7 @@ export default function Home() {
 
             <StreamingTimeline
               items={cardTimeline}
-              isActive={isGeneratingCard}
+              isActive={isGeneratingCard || isEditingCard}
             />
           </form>
 
@@ -679,20 +935,71 @@ export default function Home() {
 
             <textarea
               value={characterCard}
-              onChange={(event) => setCharacterCard(event.target.value)}
-              readOnly={!isCharacterCardManualEdit || isGeneratingCard}
+              onChange={(event) => {
+                setCharacterCard(event.target.value);
+                setCardUndo(null);
+              }}
+              readOnly={
+                !isCharacterCardManualEdit || isGeneratingCard || isEditingCard
+              }
               spellCheck={false}
               placeholder="Generate a character card to see output here, or enable manual edit to paste one."
               rows={16}
               className="min-h-[26rem] w-full rounded-2xl border border-white/10 bg-zinc-900/95 p-4 font-mono text-xs leading-relaxed text-zinc-200 outline-none ring-pink-400/40 transition focus:ring read-only:cursor-default read-only:text-zinc-300/90 sm:text-sm"
             />
             <p className="text-xs text-zinc-400">
-              {isCharacterCardManualEdit
-                ? isGeneratingCard
-                  ? "Manual editing is temporarily locked while generation is streaming."
-                  : "Manual editing is on. You can paste an existing character card here."
-                : "Manual editing is off. This field still updates from generation and streaming events."}
+              {isEditingCard
+                ? "Applying an AI edit. The field unlocks when it finishes."
+                : isCharacterCardManualEdit
+                  ? isGeneratingCard
+                    ? "Manual editing is temporarily locked while generation is streaming."
+                    : "Manual editing is on. You can paste an existing character card here."
+                  : "Manual editing is off. This field still updates from generation and streaming events."}
             </p>
+
+            <form
+              onSubmit={handleEditCard}
+              className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/60 p-4"
+            >
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-zinc-100">
+                  Edit with AI
+                </span>
+                <textarea
+                  value={cardEditInstruction}
+                  onChange={(event) =>
+                    setCardEditInstruction(event.target.value)
+                  }
+                  placeholder='e.g. "Add that she secretly likes pandas."'
+                  rows={2}
+                  disabled={isGeneratingCard || isEditingCard}
+                  className="w-full rounded-xl border border-white/15 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-pink-400/40 transition focus:ring disabled:opacity-50"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={!canEditCard}
+                  className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-pink-500 via-fuchsia-500 to-indigo-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isEditingCard ? "Applying AI Edit..." : "Apply AI Edit"}
+                </button>
+                {cardUndo !== null ? (
+                  <button
+                    type="button"
+                    onClick={handleUndoCard}
+                    disabled={isGeneratingCard || isEditingCard}
+                    className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Undo AI Edit
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-2 text-xs text-zinc-400">
+                Edits use the text currently in the box, including manual
+                pastes.
+              </p>
+            </form>
           </div>
         </section>
 
@@ -728,7 +1035,7 @@ export default function Home() {
           <div className="mt-4">
             <StreamingTimeline
               items={openingTimeline}
-              isActive={isGeneratingOpening}
+              isActive={isGeneratingOpening || isEditingOpening}
             />
           </div>
 
@@ -743,21 +1050,99 @@ export default function Home() {
               <h3 className="text-sm font-semibold text-zinc-100">
                 Generated Opening Message
               </h3>
-              <button
-                type="button"
-                onClick={() => handleCopy(openingMessage, "opening")}
-                disabled={!openingMessage.trim()}
-                className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {copiedField === "opening" ? "Copied" : "Copy to Clipboard"}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-zinc-900/80 px-3 py-1 text-xs text-zinc-200">
+                  <input
+                    type="checkbox"
+                    checked={isOpeningMessageManualEdit}
+                    onChange={(event) =>
+                      setIsOpeningMessageManualEdit(event.target.checked)
+                    }
+                    className="h-3.5 w-3.5 rounded border-white/20 bg-zinc-950 text-pink-400 accent-pink-400"
+                  />
+                  Manual edit
+                </label>
+
+                <button
+                  type="button"
+                  onClick={() => handleCopy(openingMessage, "opening")}
+                  disabled={!openingMessage.trim()}
+                  className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-1 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {copiedField === "opening" ? "Copied" : "Copy to Clipboard"}
+                </button>
+              </div>
             </div>
 
-            <pre className="max-h-[24rem] overflow-auto rounded-2xl border border-white/10 bg-zinc-900/95 p-4 text-xs leading-relaxed text-zinc-200 sm:text-sm">
-              {openingMessage.trim()
-                ? renderCodeBlock(openingMessage)
-                : "```txt\nGenerate an opening message to see output here.\n```"}
-            </pre>
+            <textarea
+              value={openingMessage}
+              onChange={(event) => {
+                setOpeningMessage(event.target.value);
+                setOpeningUndo(null);
+              }}
+              readOnly={
+                !isOpeningMessageManualEdit ||
+                isGeneratingOpening ||
+                isEditingOpening
+              }
+              spellCheck={false}
+              placeholder="Generate an opening message to see output here, or enable manual edit to paste one."
+              rows={10}
+              className="min-h-[16rem] w-full rounded-2xl border border-white/10 bg-zinc-900/95 p-4 font-mono text-xs leading-relaxed text-zinc-200 outline-none ring-pink-400/40 transition focus:ring read-only:cursor-default read-only:text-zinc-300/90 sm:text-sm"
+            />
+            <p className="text-xs text-zinc-400">
+              {isEditingOpening
+                ? "Applying an AI edit. The field unlocks when it finishes."
+                : isOpeningMessageManualEdit
+                  ? isGeneratingOpening
+                    ? "Manual editing is temporarily locked while generation is streaming."
+                    : "Manual editing is on. You can paste an existing opening message here."
+                  : "Manual editing is off. This field still updates from generation and streaming events."}
+            </p>
+
+            <form
+              onSubmit={handleEditOpening}
+              className="mt-4 rounded-2xl border border-white/10 bg-zinc-900/60 p-4"
+            >
+              <label className="flex flex-col gap-2">
+                <span className="text-sm font-semibold text-zinc-100">
+                  Edit with AI
+                </span>
+                <textarea
+                  value={openingEditInstruction}
+                  onChange={(event) =>
+                    setOpeningEditInstruction(event.target.value)
+                  }
+                  placeholder='e.g. "Make the scene start with heavy rain."'
+                  rows={2}
+                  disabled={isGeneratingOpening || isEditingOpening}
+                  className="w-full rounded-xl border border-white/15 bg-zinc-900/80 px-3 py-2 text-sm text-zinc-100 outline-none ring-pink-400/40 transition focus:ring disabled:opacity-50"
+                />
+              </label>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={!canEditOpening}
+                  className="inline-flex items-center justify-center rounded-xl bg-gradient-to-r from-indigo-500 via-violet-500 to-pink-500 px-4 py-2 text-sm font-semibold text-white transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {isEditingOpening ? "Applying AI Edit..." : "Apply AI Edit"}
+                </button>
+                {openingUndo !== null ? (
+                  <button
+                    type="button"
+                    onClick={handleUndoOpening}
+                    disabled={isGeneratingOpening || isEditingOpening}
+                    className="rounded-lg border border-white/20 bg-zinc-800/80 px-3 py-2 text-xs font-medium text-zinc-100 transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Undo AI Edit
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-2 text-xs text-zinc-400">
+                Edits use the text currently in the box, including manual
+                pastes.
+              </p>
+            </form>
           </div>
         </section>
 
