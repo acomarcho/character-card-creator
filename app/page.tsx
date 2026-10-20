@@ -587,7 +587,6 @@ export default function Home() {
         if (eventData.type === "done") {
           setCharacterCard(eventData.output);
           setCardUndo(base);
-          setCardEditInstruction("");
           appendCardTimeline("Edit applied.", "success");
           return;
         }
@@ -668,7 +667,6 @@ export default function Home() {
         if (eventData.type === "done") {
           setOpeningMessage(eventData.output);
           setOpeningUndo(base);
-          setOpeningEditInstruction("");
           appendOpeningTimeline("Edit applied.", "success");
           return;
         }
