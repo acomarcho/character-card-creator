@@ -87,10 +87,12 @@ export function createEditStream(
           try {
             const edits = await generate({
               system: buildEditSystemPrompt(input.target, {
-                presetFormatting:
+                presetHeader:
                   input.target === "opening-message" &&
-                  (hasPresetHeader(input.content) ||
-                    hasPresetColors(input.content)),
+                  hasPresetHeader(input.content),
+                presetColors:
+                  input.target === "opening-message" &&
+                  hasPresetColors(input.content),
               }),
               prompt: buildEditUserPrompt({
                 target: input.target,

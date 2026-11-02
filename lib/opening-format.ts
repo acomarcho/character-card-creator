@@ -37,7 +37,7 @@ const COLOR_ATTRIBUTE_PATTERN = /^\s*color\s*=\s*"([^"]+)"\s*$/i;
 
 export function weatherConsistent(header: string, output: string): boolean {
   const weather = header.split("|")[3] ?? "";
-  const story = output.split("\n").slice(1).join("\n");
+  const story = stripColoredDialogue(output.split("\n").slice(1).join("\n"));
   const rainStopped =
     /\brain(s)? (had )?(stopped|thinned|eased|let up|died down|ended)\b|\bthe rain was over\b/i.test(
       story,
@@ -61,6 +61,10 @@ export function weatherConsistent(header: string, output: string): boolean {
   );
 }
 
+export function stripColoredDialogue(text: string): string {
+  return text.replace(/<font\s+[^>]*>[\s\S]*?<\/font\s*>/gi, "");
+}
+
 export type FormatCheck = {
   ok: boolean;
   problems: string[];
@@ -71,11 +75,21 @@ export function firstHeaderLine(text: string): string {
 }
 
 export function hasPresetHeader(text: string): boolean {
-  return /^\[\s*Time:/i.test(firstHeaderLine(text));
+  return validateHeaderLine(firstHeaderLine(text)).ok;
 }
 
 export function hasPresetColors(text: string): boolean {
-  return /<font\b/i.test(text);
+  for (const match of text.matchAll(/<font\b([^>]*)>/gi)) {
+    const color = match[1]
+      ?.match(COLOR_ATTRIBUTE_PATTERN)?.[1]
+      ?.toUpperCase();
+
+    if (color && PALETTE.has(color)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function validateHeaderLine(line: string): FormatCheck {
@@ -223,6 +237,13 @@ export function validateOpeningFormat(text: string): FormatCheck {
     problems.push("Do not use backticks or code formatting.");
   }
 
+  return { ok: problems.length === 0, problems };
+}
+
+export function validateOpeningNarrative(text: string): FormatCheck {
+  const problems: string[] = [];
+  const story = stripColoredDialogue(text.trim().split("\n").slice(1).join("\n"));
+
   const paragraphs = story
     .split(/\n\s*\n/)
     .filter((paragraph) => paragraph.trim().length > 0).length;
@@ -238,6 +259,23 @@ export function validateOpeningFormat(text: string): FormatCheck {
   }
 
   return { ok: problems.length === 0, problems };
+}
+
+export function chooseFormatRepairOutput(input: {
+  firstOutput: string;
+  repairedOutput: string;
+  problems: string[];
+}): { output: string; formatWarning?: string } {
+  if (input.problems.length === 0) {
+    return { output: input.repairedOutput };
+  }
+
+  return {
+    output: input.firstOutput.trim()
+      ? input.firstOutput
+      : input.repairedOutput,
+    formatWarning: `Formatting check still failing: ${input.problems.join(" ")}`,
+  };
 }
 
 // Used by the AI edit path: only enforce the formatting that was already present,

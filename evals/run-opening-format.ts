@@ -12,16 +12,15 @@ import {
 } from "../lib/reference-prompts.ts";
 import {
   firstHeaderLine,
-  hasPresetColors,
-  hasPresetHeader,
   validateOpeningFormat,
+  validateOpeningNarrative,
+  weatherConsistent,
 } from "../lib/opening-format.ts";
 import {
   formattingOffCase,
   openingFormatCases,
   type OpeningFormatCase,
 } from "./opening-format-fixtures.ts";
-import { weatherConsistent } from "./checks.ts";
 
 const apiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? "";
 
@@ -193,8 +192,19 @@ async function evaluateCase(
   try {
     const generation = await generateFormattedOpening(testCase, formatting);
     const header = firstHeaderLine(generation.output);
+    const offClean =
+      !/<font\b/i.test(generation.output) &&
+      !/^\[\s*Time:/i.test(header);
     const format = formatting
-      ? validateOpeningFormat(generation.output)
+      ? (() => {
+          const formatCheck = validateOpeningFormat(generation.output);
+          const narrativeCheck = validateOpeningNarrative(generation.output);
+
+          return {
+            ok: formatCheck.ok && narrativeCheck.ok,
+            problems: [...formatCheck.problems, ...narrativeCheck.problems],
+          };
+        })()
       : { ok: true, problems: [] };
     const distinctColors = countDistinctColors(generation.output);
     const mustOk = (testCase.mustInclude ?? []).every((pattern) =>
@@ -213,29 +223,26 @@ async function evaluateCase(
       repairUsed: generation.repairUsed,
       repairSucceeded: generation.repairSucceeded,
       initialProblems: generation.initialProblems,
-      formatOk: formatting
-        ? format.ok
-        : !hasPresetHeader(generation.output) &&
-          !hasPresetColors(generation.output),
+      formatOk: formatting ? format.ok : offClean,
       formatProblems: format.problems,
       timeOk: formatting
         ? testCase.expectedTime.test(header)
-        : !hasPresetHeader(generation.output),
+        : offClean,
       locationOk: formatting
         ? testCase.expectedLocation.test(header)
-        : !hasPresetHeader(generation.output),
+        : offClean,
       monthOk: formatting
         ? (testCase.expectedMonth?.test(header) ?? true)
-        : !hasPresetHeader(generation.output),
+        : offClean,
       weatherOk: formatting
         ? (testCase.expectedWeather?.test(header) ?? true)
-        : !hasPresetHeader(generation.output),
+        : offClean,
       weatherConsistencyOk: formatting
         ? weatherConsistent(header, generation.output)
         : true,
       colorsOk: formatting
         ? distinctColors >= testCase.minDistinctColors
-        : !hasPresetColors(generation.output),
+        : offClean,
       distinctColors,
       mustOk,
     };

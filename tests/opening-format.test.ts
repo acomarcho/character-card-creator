@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 
 import {
   PRESET_PALETTE,
+  chooseFormatRepairOutput,
   hasPresetColors,
   hasPresetHeader,
   validateOpeningFormat,
+  validateOpeningNarrative,
   validatePreservedOpeningFormat,
+  weatherConsistent,
 } from "../lib/opening-format.ts";
 import { buildOpeningMessageSystemPrompt } from "../lib/reference-prompts.ts";
 import { validateEditedContent } from "../lib/edit-content.ts";
-import { weatherConsistent } from "../evals/checks.ts";
 
 const header =
   "[ Time: 11:47 PM | Monday, October 20 | Sae's office, Tokyo | Clear ]";
@@ -89,8 +93,8 @@ test("allows characters to mention {{user}} in their own dialogue", () => {
   assert.deepEqual(result, { ok: true, problems: [] });
 });
 
-test("detects a time-skip phrase", () => {
-  const result = validateOpeningFormat(
+test("detects a time-skip phrase in narration", () => {
+  const result = validateOpeningNarrative(
     valid.replace(
       "The clock on the wall read 11:47.",
       "An hour later, the clock on the wall read 12:47.",
@@ -99,6 +103,17 @@ test("detects a time-skip phrase", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.problems.join(" "), /time-skip/);
+});
+
+test("ignores time-skip phrases inside dialogue", () => {
+  const result = validateOpeningNarrative(
+    valid.replace(
+      '"Close the door and sit,"',
+      '"Close the door and sit. An hour later, we can talk,"',
+    ),
+  );
+
+  assert.equal(result.ok, true);
 });
 
 test("detects too many story paragraphs", () => {
@@ -111,9 +126,9 @@ test("detects too many story paragraphs", () => {
     "",
     "Three.",
     "",
-    '<font color="#56B4E9">"Four."</font>',
+    "Four.",
   ].join("\n");
-  const result = validateOpeningFormat(story);
+  const result = validateOpeningNarrative(story);
 
   assert.equal(result.ok, false);
   assert.match(result.problems.join(" "), /4 paragraphs/);
@@ -194,6 +209,73 @@ test("format detection helpers", () => {
   assert.equal(hasPresetColors(valid), true);
   assert.equal(hasPresetHeader("Plain text"), false);
   assert.equal(hasPresetColors("Plain text"), false);
+  assert.equal(hasPresetHeader("[Time: 5 minutes]"), false);
+  assert.equal(hasPresetColors('<font color="red">"Hi."</font>'), false);
+  assert.equal(hasPresetColors('<font color="#123456">"Hi."</font>'), false);
+  assert.equal(
+    hasPresetColors('<font color="#56B4E9">"Hi."</font>'),
+    true,
+  );
+});
+
+test("paragraph and time-skip rules are narrative checks, not format checks", () => {
+  const tooLong = [
+    header,
+    "",
+    "One.",
+    "",
+    "Two.",
+    "",
+    "Three.",
+    "",
+    "Four.",
+  ].join("\n");
+
+  assert.equal(validateOpeningFormat(tooLong).ok, true);
+  assert.equal(validateOpeningNarrative(tooLong).ok, false);
+});
+
+test("keeps the first output when the repair is still invalid", () => {
+  const choice = chooseFormatRepairOutput({
+    firstOutput: "first output",
+    repairedOutput: "repaired output",
+    problems: ["still bad"],
+  });
+
+  assert.equal(choice.output, "first output");
+  assert.match(choice.formatWarning ?? "", /still bad/);
+});
+
+test("uses the repaired output when it passes", () => {
+  const choice = chooseFormatRepairOutput({
+    firstOutput: "first output",
+    repairedOutput: "repaired output",
+    problems: [],
+  });
+
+  assert.equal(choice.output, "repaired output");
+  assert.equal(choice.formatWarning, undefined);
+});
+
+test("uses the repaired output when the first output is empty", () => {
+  const choice = chooseFormatRepairOutput({
+    firstOutput: "",
+    repairedOutput: "repaired output",
+    problems: ["still bad"],
+  });
+
+  assert.equal(choice.output, "repaired output");
+});
+
+test("vendored preset formatting lists the whole palette", () => {
+  const reference = readFileSync(
+    join(process.cwd(), "references", "preset-formatting.md"),
+    "utf8",
+  );
+
+  for (const color of PRESET_PALETTE) {
+    assert.ok(reference.includes(color), `Missing ${color}`);
+  }
 });
 
 test("weather consistency ignores steam and matches real weather", () => {

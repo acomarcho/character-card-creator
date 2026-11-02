@@ -36,7 +36,7 @@ function paragraphs(content: string): string[] {
 
 export function buildEditSystemPrompt(
   target: EditTarget,
-  options?: { presetFormatting?: boolean },
+  options?: { presetHeader?: boolean; presetColors?: boolean },
 ): string {
   const formatRules =
     target === "character-card"
@@ -60,10 +60,15 @@ export function buildEditSystemPrompt(
           "- No preamble, no bullet points, no commentary.",
         ];
 
-  if (target === "opening-message" && options?.presetFormatting) {
+  if (target === "opening-message" && options?.presetHeader) {
     formatRules.push(
-      '- The current opening already uses the preset formatting. Keep the time/place header as the first line in the same shape, and keep every spoken dialogue line wrapped in a palette <font color="#HEX">...</font> tag.',
-      "- Never color narration. If the edit changes the time, place or weather, update the header values to match.",
+      "- The current opening already has the preset time/place header. Keep it as the first line in the same shape. If the edit changes the time, place or weather, update the header values to match.",
+    );
+  }
+
+  if (target === "opening-message" && options?.presetColors) {
+    formatRules.push(
+      '- The current opening already uses colored dialogue. Keep every spoken dialogue line wrapped in a palette <font color="#HEX">...</font> tag, and never color narration.',
     );
   }
 

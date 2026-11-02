@@ -1,6 +1,7 @@
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createMCPClient, type MCPClient } from "@ai-sdk/mcp";
 import { stepCountIs, streamText, type ToolSet } from "ai";
+import { chooseFormatRepairOutput } from "./opening-format.ts";
 
 type AgentGenerationInput = {
   apiKey: string;
@@ -253,12 +254,17 @@ export function createAgenticGenerationStream(
                 {},
                 input.buildRepairPrompt(input.prompt, problems, firstOutput),
               );
-              finalOutput = processOutput(outputText);
-              problems = input.validate(finalOutput);
+              const repairedOutput = processOutput(outputText);
+              problems = input.validate(repairedOutput);
 
-              if (problems.length > 0) {
-                formatWarning = `Formatting check still failing: ${problems.join(" ")}`;
-              }
+              const choice = chooseFormatRepairOutput({
+                firstOutput,
+                repairedOutput,
+                problems,
+              });
+
+              finalOutput = choice.output;
+              formatWarning = choice.formatWarning;
             } catch {
               finalOutput = firstOutput;
               formatWarning =

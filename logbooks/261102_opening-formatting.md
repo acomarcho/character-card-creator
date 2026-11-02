@@ -44,8 +44,8 @@ in SillyTavern would be formatted; the opening message would not.
   restart.
 - `lib/edit-content.ts` / `lib/edit-generation.ts` — edit prompt keeps an existing header/colors;
   edits validate preserved formatting.
-- `evals/opening-format-fixtures.ts`, `evals/run-opening-format.ts`, `evals/checks.ts` — real-API
-  eval with six scene types plus an off-mode control.
+- `evals/opening-format-fixtures.ts`, `evals/run-opening-format.ts` — real-API eval with six
+  scene types plus an off-mode control.
 - `tests/opening-format.test.ts` — 37 unit tests total across the suite.
 - `README.md` — toggle behavior and eval command.
 
@@ -68,13 +68,14 @@ header/scene, colors, and prose (1–5).
 
 | Mode | Runs | Success | Format | Time | Location | Month | Weather | Weather match | Colors | Must | Judge header/scene | Judge colors | Judge prose | Repair used | Repair success | Latency |
 |------|------|---------|--------|------|----------|-------|---------|---------------|--------|------|--------------------|--------------|-------------|-------------|----------------|---------|
-| on | 18 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 33% | 100% | 3086ms |
-| off | 3 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 4.33/5 | 0% | 0% | 2239ms |
+| on | 18 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 44% | 100% | 3442ms |
+| off | 3 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 0% | 0% | 2235ms |
 
-Raw results: `/tmp/opencode/opening-format-eval-1793594753724.json`.
+Raw results: `/tmp/opencode/opening-format-eval-1793595294228.json`.
 
-The only initial failure mode in the final run was an occasional uncolored quote; the single repair
-fixed every one (6/18 runs). Off mode added no header or color tags.
+The only initial failure modes in the final run were an occasional uncolored quote and one header
+weather mismatch; the single repair fixed every one (8/18 runs). Off mode added no header or color
+tags.
 
 ## Eval findings that changed the implementation
 
@@ -92,12 +93,23 @@ fixed every one (6/18 runs). Off mode added no header or color tags.
 4. **Eval fixture too strict:** "LeBlanc Attic, Yongen-Jaya" and "Northern Frontier, Vael" are valid
    in-scene locations but missed the original `cafe|tokyo` / `forest|trail` regexes. Broadened the
    fixture checks after reviewing the outputs.
+5. **Fresh review fixes:**
+   - If the repair still fails, keep the first output instead of showing an empty/broken repair.
+   - Only treat a full valid preset header and a palette font tag as "already formatted" on the
+     edit path, so pasted `[Time: 5 minutes]` or `<font color="red">` is not blocked.
+   - Tell the edit model separately whether the opening has a header and whether it has colors.
+   - Move paragraph-count and time-skip checks to an eval-only narrative check so the formatting
+     repair is never asked to fix something it is told not to rewrite.
+   - Ignore colored dialogue when checking header weather, so a character talking about rain does
+     not force "Rain" into a clear-scene header.
+   - Added a palette/preset-reference drift test and 6 tests for the repair-output choice and
+     detection boundaries (43 unit tests total).
 
 ## Verification
 
 | Check | Command | Result |
 |-------|---------|--------|
-| Unit tests | `npm test` | 37/37 pass |
+| Unit tests | `npm test` | 43/43 pass |
 | Typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npm run lint` | pass |
 | Production build | `npm run build` | pass; all three API routes present |
@@ -112,7 +124,14 @@ Screenshot: `/tmp/opencode/opening-format-ui.png`.
 
 - The opening seeds the colors; a later preset reply can still pick different colors for new NPCs.
   That is the preset's behavior, not controlled by the card creator.
+- "One color per speaker" is verified by the eval (two-speaker fixture + judge), not by the
+  production validator. Mapping prose attributions back to speakers is brittle, so the prompt
+  carries the rule.
 - The validator cannot know whether the header time matches the scene unless the scene states it;
   the judge/eval covers that.
-- Repair rate is ~33% (6/18) for the first pass, mostly a forgotten quote. The repair is silent and
-  adds about 1s on those runs.
+- The validator expects straight double quotes. Generated content uses them; a pasted opening with
+  curly quotes is left alone unless it already has a palette header/colors.
+- Edits only enforce the formatting that was present, so a plain pasted opening is never forced
+  into the preset style.
+- Repair rate ranged 28–44% across the last runs (8/18 in the final run), mostly a forgotten
+  quote. The repair is silent and adds about 1s on those runs.
