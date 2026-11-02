@@ -123,7 +123,10 @@ async function generateFormattedOpening(
         });
         const repaired = stripAsterisks(repair.text);
         repairSucceeded = validateOpeningFormat(repaired).ok;
-        output = repaired;
+
+        if (repairSucceeded || !output.trim()) {
+          output = repaired;
+        }
       } catch {
         // Production keeps the first output when the repair call fails.
       }

@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   PRESET_PALETTE,
   chooseFormatRepairOutput,
+  hasHeaderLikeLine,
   hasPresetColors,
   hasPresetHeader,
   validateOpeningFormat,
@@ -47,6 +48,26 @@ test("detects an invalid header date", () => {
 
   assert.equal(result.ok, false);
   assert.match(result.problems.join(" "), /not valid for October/);
+});
+
+test("detects uncolored curly dialogue", () => {
+  const result = validateOpeningFormat(
+    valid.replace(
+      '<font color="#56B4E9">"Close the door and sit,"</font>',
+      "“Close the door and sit,”",
+    ),
+  );
+
+  assert.equal(result.ok, false);
+  assert.match(result.problems.join(" "), /wrapped in a color tag/);
+});
+
+test("accepts colored curly dialogue", () => {
+  const result = validateOpeningFormat(
+    valid.replace('"Close the door and sit,"', "“Close the door and sit,”"),
+  );
+
+  assert.deepEqual(result, { ok: true, problems: [] });
 });
 
 test("detects a color outside the palette", () => {
@@ -148,7 +169,7 @@ test("present-format checks only enforce what the original had", () => {
   );
 
   assert.equal(removedFormatting.ok, false);
-  assert.match(removedFormatting.problems.join(" "), /color tag/);
+  assert.match(removedFormatting.problems.join(" "), /colored dialogue/);
 });
 
 test("edit validation keeps formatting when the original had it", () => {
@@ -166,7 +187,41 @@ test("edit validation keeps formatting when the original had it", () => {
   );
 
   assert.equal(stripped.ok, false);
-  assert.match(stripped.problems.join(" "), /color tag/);
+  assert.match(stripped.problems.join(" "), /colored dialogue/);
+});
+
+test("edit validation does not require fixing pre-existing uncolored quotes", () => {
+  const original = [
+    header,
+    "",
+    '<font color="#56B4E9">"Sit."</font> She said "CLOSED".',
+  ].join("\n");
+  const edited = original.replace("She said", "She whispered");
+
+  assert.deepEqual(
+    validateEditedContent("opening-message", original, edited).problems,
+    [],
+  );
+});
+
+test("edit validation preserves a nonconforming header shape", () => {
+  const looseHeader =
+    "[ Time: 10:30 a.m. | Monday, October 21st | Office | Clear ]";
+  const original = [looseHeader, "", "She waited."].join("\n");
+  const edited = original.replace("waited", "stood");
+
+  assert.deepEqual(validatePreservedOpeningFormat(original, edited), {
+    ok: true,
+    problems: [],
+  });
+
+  const removed = validatePreservedOpeningFormat(
+    original,
+    original.replace(`${looseHeader}\n\n`, ""),
+  );
+
+  assert.equal(removed.ok, false);
+  assert.match(removed.problems.join(" "), /removed the time\/place header/);
 });
 
 test("formatting prompt is opt-in", () => {
@@ -210,6 +265,19 @@ test("format detection helpers", () => {
   assert.equal(hasPresetHeader("Plain text"), false);
   assert.equal(hasPresetColors("Plain text"), false);
   assert.equal(hasPresetHeader("[Time: 5 minutes]"), false);
+  assert.equal(hasHeaderLikeLine("[Time: 5 minutes]"), false);
+  assert.equal(
+    hasHeaderLikeLine(
+      "[ Time: 10:30 a.m. | Monday, October 21st | Office | Clear ]",
+    ),
+    true,
+  );
+  assert.equal(
+    hasPresetHeader(
+      "[ Time: 10:30 a.m. | Monday, October 21st | Office | Clear ]",
+    ),
+    false,
+  );
   assert.equal(hasPresetColors('<font color="red">"Hi."</font>'), false);
   assert.equal(hasPresetColors('<font color="#123456">"Hi."</font>'), false);
   assert.equal(
@@ -238,17 +306,19 @@ test("paragraph and time-skip rules are narrative checks, not format checks", ()
 test("keeps the first output when the repair is still invalid", () => {
   const choice = chooseFormatRepairOutput({
     firstOutput: "first output",
+    firstProblems: ["first problem"],
     repairedOutput: "repaired output",
     problems: ["still bad"],
   });
 
   assert.equal(choice.output, "first output");
-  assert.match(choice.formatWarning ?? "", /still bad/);
+  assert.match(choice.formatWarning ?? "", /first problem/);
 });
 
 test("uses the repaired output when it passes", () => {
   const choice = chooseFormatRepairOutput({
     firstOutput: "first output",
+    firstProblems: ["first problem"],
     repairedOutput: "repaired output",
     problems: [],
   });
@@ -260,11 +330,13 @@ test("uses the repaired output when it passes", () => {
 test("uses the repaired output when the first output is empty", () => {
   const choice = chooseFormatRepairOutput({
     firstOutput: "",
+    firstProblems: [],
     repairedOutput: "repaired output",
     problems: ["still bad"],
   });
 
   assert.equal(choice.output, "repaired output");
+  assert.match(choice.formatWarning ?? "", /still bad/);
 });
 
 test("vendored preset formatting lists the whole palette", () => {
@@ -300,10 +372,23 @@ test("weather consistency ignores steam and matches real weather", () => {
 
   assert.equal(
     weatherConsistent(
-      "[ Time: 5:42 AM | Tuesday, October 21 | The trail | Cold morning mist ]",
-      "The mist hung low between the pines.",
+      "[ Time: 5:42 AM | Tuesday, October 21 | The trail | Heavy snow ]",
+      "[ Time: 5:42 AM | Tuesday, October 21 | The trail | Heavy snow ]\n\nSnow piled against the pines.",
     ),
     true,
+  );
+
+  assert.equal(
+    weatherConsistent(
+      clearHeader,
+      `${clearHeader}\n\nSnow piled against the pines.`,
+    ),
+    false,
+  );
+
+  assert.equal(
+    weatherConsistent(clearHeader, "Rain streaked the window."),
+    false,
   );
 
   assert.equal(

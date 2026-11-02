@@ -68,14 +68,13 @@ header/scene, colors, and prose (1–5).
 
 | Mode | Runs | Success | Format | Time | Location | Month | Weather | Weather match | Colors | Must | Judge header/scene | Judge colors | Judge prose | Repair used | Repair success | Latency |
 |------|------|---------|--------|------|----------|-------|---------|---------------|--------|------|--------------------|--------------|-------------|-------------|----------------|---------|
-| on | 18 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 44% | 100% | 3442ms |
-| off | 3 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 0% | 0% | 2235ms |
+| on | 18 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 5.00/5 | 50% | 100% | 3664ms |
+| off | 3 | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 5.00/5 | 5.00/5 | 4.00/5 | 0% | 0% | 2024ms |
 
-Raw results: `/tmp/opencode/opening-format-eval-1793595294228.json`.
+Raw results: `/tmp/opencode/opening-format-eval-1793595700927.json`.
 
-The only initial failure modes in the final run were an occasional uncolored quote and one header
-weather mismatch; the single repair fixed every one (8/18 runs). Off mode added no header or color
-tags.
+The only initial failure mode in the final run was an occasional uncolored quote; the single repair
+fixed every one (9/18 runs). Off mode added no header or color tags.
 
 ## Eval findings that changed the implementation
 
@@ -104,12 +103,22 @@ tags.
      not force "Rain" into a clear-scene header.
    - Added a palette/preset-reference drift test and 6 tests for the repair-output choice and
      detection boundaries (43 unit tests total).
+6. **Second fresh review fixes:**
+   - Edit validation now only requires that the header/colors present before are still present; it
+     no longer tries to fix pre-existing uncolored quotes or colored narration.
+   - The warning names the problems of the output actually shown, not the discarded repair.
+   - An empty output after repair raises an error instead of rendering a blank opening.
+   - Curly `“…”` dialogue is accepted as dialogue.
+   - A non-conforming but header-like pasted header is preserved without forcing the strict preset
+     shape.
+   - The eval now mirrors production's keep-first behavior when a repair fails.
+   - 47 unit tests total.
 
 ## Verification
 
 | Check | Command | Result |
 |-------|---------|--------|
-| Unit tests | `npm test` | 43/43 pass |
+| Unit tests | `npm test` | 47/47 pass |
 | Typecheck | `npx tsc --noEmit` | pass |
 | Lint | `npm run lint` | pass |
 | Production build | `npm run build` | pass; all three API routes present |
@@ -129,9 +138,7 @@ Screenshot: `/tmp/opencode/opening-format-ui.png`.
   carries the rule.
 - The validator cannot know whether the header time matches the scene unless the scene states it;
   the judge/eval covers that.
-- The validator expects straight double quotes. Generated content uses them; a pasted opening with
-  curly quotes is left alone unless it already has a palette header/colors.
 - Edits only enforce the formatting that was present, so a plain pasted opening is never forced
   into the preset style.
-- Repair rate ranged 28–44% across the last runs (8/18 in the final run), mostly a forgotten
+- Repair rate ranged 28–50% across the last runs (9/18 in the final run), mostly a forgotten
   quote. The repair is silent and adds about 1s on those runs.

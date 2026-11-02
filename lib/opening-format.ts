@@ -37,7 +37,11 @@ const COLOR_ATTRIBUTE_PATTERN = /^\s*color\s*=\s*"([^"]+)"\s*$/i;
 
 export function weatherConsistent(header: string, output: string): boolean {
   const weather = header.split("|")[3] ?? "";
-  const story = stripColoredDialogue(output.split("\n").slice(1).join("\n"));
+  const lines = output.split("\n");
+  const body = /^\[\s*Time:/i.test(lines[0]?.trim() ?? "")
+    ? lines.slice(1).join("\n")
+    : output;
+  const story = stripColoredDialogue(body);
   const rainStopped =
     /\brain(s)? (had )?(stopped|thinned|eased|let up|died down|ended)\b|\bthe rain was over\b/i.test(
       story,
@@ -76,6 +80,10 @@ export function firstHeaderLine(text: string): string {
 
 export function hasPresetHeader(text: string): boolean {
   return validateHeaderLine(firstHeaderLine(text)).ok;
+}
+
+export function hasHeaderLikeLine(text: string): boolean {
+  return /^\[\s*Time:.*\|.*\|.*\|.*\]$/i.test(firstHeaderLine(text));
 }
 
 export function hasPresetColors(text: string): boolean {
@@ -136,7 +144,7 @@ export function validateHeaderLine(line: string): FormatCheck {
   return { ok: problems.length === 0, problems };
 }
 
-function validateColors(text: string): FormatCheck {
+function validateColorTags(text: string): FormatCheck {
   const problems: string[] = [];
   const opens = Array.from(text.matchAll(FONT_OPEN_PATTERN));
   const closes = Array.from(text.matchAll(FONT_CLOSE_PATTERN));
@@ -167,7 +175,7 @@ function validateColors(text: string): FormatCheck {
     const colorMatch = attributes.match(COLOR_ATTRIBUTE_PATTERN);
     const color = colorMatch?.[1]?.toUpperCase() ?? "";
 
-    if (!colorMatch || !/^#[0-9A-F]{6}$/.test(color ?? "")) {
+    if (!colorMatch || !/^#[0-9A-F]{6}$/.test(color)) {
       problems.push(
         `Color tag must use color="#HEX" with a six-digit hex value, got: ${tag[0]}`,
       );
@@ -179,12 +187,34 @@ function validateColors(text: string): FormatCheck {
     }
   }
 
+  return { ok: problems.length === 0, problems };
+}
+
+function countPaletteTags(text: string): number {
+  let count = 0;
+
+  for (const match of text.matchAll(FONT_OPEN_PATTERN)) {
+    const color = match[1]
+      ?.match(COLOR_ATTRIBUTE_PATTERN)?.[1]
+      ?.toUpperCase();
+
+    if (color && PALETTE.has(color)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function validateColors(text: string): FormatCheck {
+  const problems = [...validateColorTags(text).problems];
+
   const withoutColors = text.replace(
     /<font\s+[^>]*>([\s\S]*?)<\/font\s*>/gi,
     (whole, inner: string) => {
       const content = inner.trim();
 
-      if (!content.startsWith('"') || !content.endsWith('"')) {
+      if (!/^["“]/.test(content) || !/["”]$/.test(content)) {
         problems.push(
           `Colored text must be spoken dialogue in double quotes, got: ${content.slice(0, 60)}`,
         );
@@ -194,7 +224,7 @@ function validateColors(text: string): FormatCheck {
     },
   );
 
-  if (/"/.test(withoutColors)) {
+  if (/["“”]/.test(withoutColors)) {
     problems.push("Every line of spoken dialogue must be wrapped in a color tag.");
   }
 
@@ -263,6 +293,7 @@ export function validateOpeningNarrative(text: string): FormatCheck {
 
 export function chooseFormatRepairOutput(input: {
   firstOutput: string;
+  firstProblems: string[];
   repairedOutput: string;
   problems: string[];
 }): { output: string; formatWarning?: string } {
@@ -270,11 +301,12 @@ export function chooseFormatRepairOutput(input: {
     return { output: input.repairedOutput };
   }
 
+  const useFirst = input.firstOutput.trim().length > 0;
+  const chosenProblems = useFirst ? input.firstProblems : input.problems;
+
   return {
-    output: input.firstOutput.trim()
-      ? input.firstOutput
-      : input.repairedOutput,
-    formatWarning: `Formatting check still failing: ${input.problems.join(" ")}`,
+    output: useFirst ? input.firstOutput : input.repairedOutput,
+    formatWarning: `Formatting check still failing: ${chosenProblems.join(" ")}`,
   };
 }
 
@@ -295,10 +327,18 @@ export function validatePreservedOpeningFormat(
     if (editedTrimmed.split("\n").filter((line) => /^\[\s*Time:/i.test(line.trim())).length > 1) {
       problems.push("Only the first line may contain the time header.");
     }
+  } else if (hasHeaderLikeLine(originalTrimmed)) {
+    if (!hasHeaderLikeLine(editedTrimmed)) {
+      problems.push("Edit removed the time/place header.");
+    }
   }
 
   if (hasPresetColors(originalTrimmed)) {
-    problems.push(...validateColors(editedTrimmed).problems);
+    problems.push(...validateColorTags(editedTrimmed).problems);
+
+    if (countPaletteTags(editedTrimmed) === 0) {
+      problems.push("Edit removed the colored dialogue.");
+    }
   }
 
   return { ok: problems.length === 0, problems };

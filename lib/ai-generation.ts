@@ -236,6 +236,7 @@ export function createAgenticGenerationStream(
 
           if (problems.length > 0) {
             const firstOutput = finalOutput;
+            const firstProblems = problems;
 
             emit({
               type: "status",
@@ -259,6 +260,7 @@ export function createAgenticGenerationStream(
 
               const choice = chooseFormatRepairOutput({
                 firstOutput,
+                firstProblems,
                 repairedOutput,
                 problems,
               });
@@ -271,6 +273,12 @@ export function createAgenticGenerationStream(
                 "Formatting repair failed. Showing the first output; check the header and dialogue colors.";
             }
           }
+        }
+
+        if (input.validate && !finalOutput.trim()) {
+          throw new Error(
+            "The model returned an empty opening message. Try again.",
+          );
         }
 
         emit({
