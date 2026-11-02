@@ -26,12 +26,14 @@ type GenerationStreamEvent =
     }
   | {
       type: "reset-output";
+      reason?: "tool-fallback" | "format-repair";
     }
   | {
       type: "done";
       output: string;
       usedWebTools: boolean;
       toolWarning?: string;
+      formatWarning?: string;
     }
   | {
       type: "error";
@@ -52,6 +54,7 @@ const STORAGE_KEYS = {
   characterName: "character-card-creator:character-name",
   characterContext: "character-card-creator:character-context",
   openingContext: "character-card-creator:opening-context",
+  presetFormatting: "character-card-creator:preset-formatting",
   characterCardManualEdit: "character-card-creator:character-card-manual-edit",
   openingMessageManualEdit: "character-card-creator:opening-message-manual-edit",
 };
@@ -184,6 +187,7 @@ export default function Home() {
   const [isCharacterCardManualEdit, setIsCharacterCardManualEdit] =
     useState(false);
   const [openingContext, setOpeningContext] = useState("");
+  const [applyPresetFormatting, setApplyPresetFormatting] = useState(false);
   const [openingMessage, setOpeningMessage] = useState("");
   const [isOpeningMessageManualEdit, setIsOpeningMessageManualEdit] =
     useState(false);
@@ -202,6 +206,9 @@ export default function Home() {
   );
   const [cardToolNotice, setCardToolNotice] = useState<string | null>(null);
   const [openingToolNotice, setOpeningToolNotice] = useState<string | null>(
+    null,
+  );
+  const [openingFormatNotice, setOpeningFormatNotice] = useState<string | null>(
     null,
   );
   const [cardTimeline, setCardTimeline] = useState<TimelineItem[]>([]);
@@ -249,6 +256,9 @@ export default function Home() {
       localStorage.getItem(STORAGE_KEYS.openingMessageManualEdit) === "true",
     );
     setOpeningContext(localStorage.getItem(STORAGE_KEYS.openingContext) ?? "");
+    setApplyPresetFormatting(
+      localStorage.getItem(STORAGE_KEYS.presetFormatting) === "true",
+    );
   }, []);
 
   useEffect(() => {
@@ -277,6 +287,13 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEYS.openingContext, openingContext);
   }, [openingContext]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      STORAGE_KEYS.presetFormatting,
+      String(applyPresetFormatting),
+    );
+  }, [applyPresetFormatting]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -414,6 +431,7 @@ export default function Home() {
 
     setError(null);
     setOpeningToolNotice(null);
+    setOpeningFormatNotice(null);
     setOpeningTimeline([
       {
         id: nextTimelineId(),
@@ -453,6 +471,7 @@ export default function Home() {
           characterName,
           characterCard,
           openingContext,
+          presetFormatting: applyPresetFormatting,
         }),
       });
 
@@ -491,7 +510,9 @@ export default function Home() {
         if (eventData.type === "reset-output") {
           setOpeningMessage("");
           appendOpeningTimeline(
-            "Restarted generation without tools.",
+            eventData.reason === "format-repair"
+              ? "Restarted to fix the preset formatting."
+              : "Restarted generation without tools.",
             "warning",
           );
           return;
@@ -505,6 +526,13 @@ export default function Home() {
         if (eventData.type === "done") {
           setOpeningMessage(eventData.output);
           appendOpeningTimeline("Final output is ready.", "success");
+
+          if (eventData.formatWarning) {
+            setOpeningFormatNotice(eventData.formatWarning);
+            appendOpeningTimeline(eventData.formatWarning, "warning");
+          } else {
+            setOpeningFormatNotice(null);
+          }
 
           if (eventData.toolWarning) {
             setOpeningToolNotice(eventData.toolWarning);
@@ -667,6 +695,7 @@ export default function Home() {
         if (eventData.type === "done") {
           setOpeningMessage(eventData.output);
           setOpeningUndo(base);
+          setOpeningFormatNotice(null);
           appendOpeningTimeline("Edit applied.", "success");
           return;
         }
@@ -1019,6 +1048,30 @@ export default function Home() {
             />
           </label>
 
+          <label className="mt-4 flex items-start gap-2 rounded-xl border border-white/10 bg-zinc-900/60 px-3 py-2 text-xs text-zinc-200">
+            <input
+              type="checkbox"
+              checked={applyPresetFormatting}
+              onChange={(event) =>
+                setApplyPresetFormatting(event.target.checked)
+              }
+              className="mt-0.5 h-3.5 w-3.5 rounded border-white/20 bg-zinc-950 text-pink-400 accent-pink-400"
+            />
+            <span>
+              <span className="font-semibold text-zinc-100">
+                Apply preset time &amp; color formatting
+              </span>
+              <span className="mt-0.5 block text-zinc-400">
+                Adds the{" "}
+                <code className="text-zinc-300">
+                  [ Time: ... ]
+                </code>{" "}
+                header and palette-colored dialogue from your SillyTavern
+                preset.
+              </span>
+            </span>
+          </label>
+
           <button
             type="button"
             disabled={isGeneratingOpening || !canGenerateOpening}
@@ -1040,6 +1093,12 @@ export default function Home() {
           {openingToolNotice ? (
             <p className="mt-5 rounded-xl border border-emerald-400/20 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
               {openingToolNotice}
+            </p>
+          ) : null}
+
+          {openingFormatNotice ? (
+            <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-950/40 px-3 py-2 text-xs text-amber-100">
+              {openingFormatNotice}
             </p>
           ) : null}
 
@@ -1077,6 +1136,7 @@ export default function Home() {
               onChange={(event) => {
                 setOpeningMessage(event.target.value);
                 setOpeningUndo(null);
+                setOpeningFormatNotice(null);
               }}
               readOnly={
                 !isOpeningMessageManualEdit ||

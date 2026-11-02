@@ -1,4 +1,5 @@
 import { stripAsterisks, stripCodeFence } from "./reference-prompts.ts";
+import { validatePreservedOpeningFormat } from "./opening-format.ts";
 
 export const EDIT_TARGETS = ["character-card", "opening-message"] as const;
 
@@ -33,7 +34,10 @@ function paragraphs(content: string): string[] {
     .filter((paragraph) => paragraph.trim().length > 0);
 }
 
-export function buildEditSystemPrompt(target: EditTarget): string {
+export function buildEditSystemPrompt(
+  target: EditTarget,
+  options?: { presetFormatting?: boolean },
+): string {
   const formatRules =
     target === "character-card"
       ? [
@@ -55,6 +59,13 @@ export function buildEditSystemPrompt(target: EditTarget): string {
           "- Never use asterisks, italics or any markdown.",
           "- No preamble, no bullet points, no commentary.",
         ];
+
+  if (target === "opening-message" && options?.presetFormatting) {
+    formatRules.push(
+      '- The current opening already uses the preset formatting. Keep the time/place header as the first line in the same shape, and keep every spoken dialogue line wrapped in a palette <font color="#HEX">...</font> tag.',
+      "- Never color narration. If the edit changes the time, place or weather, update the header values to match.",
+    );
+  }
 
   return [
     ...formatRules,
@@ -195,6 +206,10 @@ export function validateEditedContent(
     if (paragraphs(trimmedEdited).length > maxParagraphs) {
       problems.push(`Edit produced more than ${maxParagraphs} paragraphs.`);
     }
+
+    problems.push(
+      ...validatePreservedOpeningFormat(trimmedOriginal, trimmedEdited).problems,
+    );
   }
 
   return { ok: problems.length === 0, problems };

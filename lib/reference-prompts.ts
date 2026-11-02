@@ -11,6 +11,11 @@ const openingMessageReference = readFileSync(
   "utf8",
 ).trim();
 
+const presetFormattingReference = readFileSync(
+  join(process.cwd(), "references", "preset-formatting.md"),
+  "utf8",
+).trim();
+
 export function buildCharacterCardSystemPrompt(): string {
   return [
     "You are an expert SillyTavern character-card writer.",
@@ -51,8 +56,10 @@ export function buildCharacterCardUserPrompt(input: {
   ].join("\n");
 }
 
-export function buildOpeningMessageSystemPrompt(): string {
-  return [
+export function buildOpeningMessageSystemPrompt(input?: {
+  presetFormatting?: boolean;
+}): string {
+  const parts = [
     "You write opening messages for SillyTavern chats.",
     "",
     "Requirements:",
@@ -69,7 +76,29 @@ export function buildOpeningMessageSystemPrompt(): string {
     "",
     "One-shot reference:",
     openingMessageReference,
-  ].join("\n");
+  ];
+
+  if (input?.presetFormatting) {
+    parts.push(
+      "",
+      "Formatting addendum from the user's SillyTavern preset. The one-shot example above is plain text and does not show this formatting. Apply it to this opening message:",
+      "",
+      presetFormattingReference,
+      "",
+      "How to apply it to this opening message:",
+      "1) The very first line must be the time header, in exactly this shape: [ Time: HH:MM AM/PM | Weekday, Month DD | Location | Weather ]",
+      "2) Use a concrete weekday, month, day, location and weather that fit the character card and opening context. Use the in-scene date, never the real-world current date.",
+      "3) The header must describe the moment the scene actually starts. If the narration states or implies a time, the header must agree with it.",
+      "4) Put one blank line after the header, then the story.",
+      '5) Wrap every line of spoken dialogue in <font color="#HEX">...</font> using one of the allowed palette hex values. Give each speaking character a unique color. {{char}} keeps that color for the rest of the chat.',
+      "6) Never color narration, the header, or any non-spoken text. Never write or color dialogue for {{user}}.",
+      "7) After the header, write two story paragraphs. Never exceed three.",
+      '8) Every quoted line must be inside a color tag. Leave the attribution outside the tag, like this: <font color="#56B4E9">"We need to go,"</font> she said. A quote outside a color tag is a formatting error.',
+      "9) Before you finish, check the whole message: the first line is the header, and every single pair of double quotes is wrapped in a color tag.",
+    );
+  }
+
+  return parts.join("\n");
 }
 
 export function buildOpeningMessageUserPrompt(input: {
@@ -90,6 +119,30 @@ export function buildOpeningMessageUserPrompt(input: {
       : "Opening context requirement: (none provided)",
     "",
     "Task: Write the opening message now.",
+  ].join("\n");
+}
+
+export function buildOpeningFormatRepairPrompt(
+  originalPrompt: string,
+  problems: string[],
+  previousOutput: string,
+): string {
+  return [
+    originalPrompt,
+    "",
+    "Your previous output:",
+    previousOutput.trim(),
+    "",
+    "[Format repair]",
+    "Your previous opening message failed these preset formatting checks:",
+    ...problems.map((problem) => `- ${problem}`),
+    "",
+    "Fix only the formatting. Do not rewrite the prose, change the story beat, or drop any sentence.",
+    "Return the exact same opening message with:",
+    "- the time header as the first line, if it is missing or malformed;",
+    "- every spoken line wrapped in a palette color tag;",
+    "- attribution and narration left uncolored.",
+    "Every pair of double quotes in the result must be inside a color tag.",
   ].join("\n");
 }
 

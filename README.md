@@ -16,9 +16,25 @@ A Next.js app to generate **SillyTavern-ready character cards** and **opening me
 - Generates an opening message from:
   - Generated character card
   - Optional opening-message context
+  - Optional preset time/color formatting
 - Uses a system prompt that embeds the exact one-shot reference from:
   - `references/opening-message.md`
 - Shows outputs in a codeblock-style panel with **copy-to-clipboard** buttons.
+
+## Preset time and color formatting
+
+Section 2 has an optional **Apply preset time & color formatting** toggle (off by default, saved in `localStorage`). When it is on, the opening message gets:
+
+- the time/place header `[ Time: HH:MM AM/PM | Weekday, Month DD | Location | Weather ]`
+- spoken dialogue wrapped in `<font color="#HEX">...</font>` using the preset palette
+
+The rules are vendored in `references/preset-formatting.md` from `acomarcho/st-preset` @ `9531ec9` (the "Time and Place" and "Colored Dialogue" prompts). Output is validated after generation, and one silent repair is attempted if the header or colors are malformed. AI edits preserve the formatting when the current opening already has it.
+
+Run the real-API eval:
+
+```bash
+DEEPSEEK_API_KEY=... npm run eval:opening-format -- 3
+```
 
 ## API key behavior (no `.env` required)
 

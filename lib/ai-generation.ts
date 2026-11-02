@@ -33,12 +33,14 @@ export type GenerationStreamEvent =
     }
   | {
       type: "reset-output";
+      reason?: "tool-fallback" | "format-repair";
     }
   | {
       type: "done";
       output: string;
       usedWebTools: boolean;
       toolWarning?: string;
+      formatWarning?: string;
     }
   | {
       type: "error";
@@ -47,6 +49,12 @@ export type GenerationStreamEvent =
 
 type AgenticStreamInput = AgentGenerationInput & {
   postProcess?: (text: string) => string;
+  validate?: (text: string) => string[];
+  buildRepairPrompt?: (
+    prompt: string,
+    problems: string[],
+    previousOutput: string,
+  ) => string;
 };
 
 const EXA_MCP_BASE_URL = "https://mcp.exa.ai/mcp";
@@ -130,11 +138,11 @@ export function createAgenticGenerationStream(
           });
         }
 
-        const streamWithTools = async (activeTools: ToolSet) => {
+        const streamWithTools = async (activeTools: ToolSet, promptText: string) => {
           const result = streamText({
             model: provider("deepseek-chat"),
             system: input.system,
-            prompt: input.prompt,
+            prompt: promptText,
             tools: activeTools,
             stopWhen: stepCountIs(6),
             temperature: 0.7,
@@ -190,7 +198,7 @@ export function createAgenticGenerationStream(
         };
 
         try {
-          await streamWithTools(tools);
+          await streamWithTools(tools, input.prompt);
         } catch (error) {
           if (usedWebTools) {
             emit({
@@ -199,7 +207,10 @@ export function createAgenticGenerationStream(
               message:
                 "Tool-augmented generation failed. Retrying without web tools...",
             });
-            emit({ type: "reset-output" });
+            emit({
+              type: "reset-output",
+              reason: "tool-fallback",
+            });
 
             outputText = "";
             usedWebTools = false;
@@ -207,15 +218,54 @@ export function createAgenticGenerationStream(
               toolWarning ??
               "Tool-augmented generation failed once. The output was regenerated without web tools.";
 
-            await streamWithTools({});
+            await streamWithTools({}, input.prompt);
           } else {
             throw error;
           }
         }
 
-        const finalOutput = input.postProcess
-          ? input.postProcess(outputText)
-          : outputText;
+        const processOutput = (raw: string) =>
+          input.postProcess ? input.postProcess(raw) : raw;
+
+        let finalOutput = processOutput(outputText);
+        let formatWarning: string | undefined;
+
+        if (input.validate && input.buildRepairPrompt) {
+          let problems = input.validate(finalOutput);
+
+          if (problems.length > 0) {
+            const firstOutput = finalOutput;
+
+            emit({
+              type: "status",
+              phase: "fallback",
+              message: `Formatting check failed. Regenerating once to fix: ${problems[0]}`,
+            });
+            emit({
+              type: "reset-output",
+              reason: "format-repair",
+            });
+
+            outputText = "";
+
+            try {
+              await streamWithTools(
+                {},
+                input.buildRepairPrompt(input.prompt, problems, firstOutput),
+              );
+              finalOutput = processOutput(outputText);
+              problems = input.validate(finalOutput);
+
+              if (problems.length > 0) {
+                formatWarning = `Formatting check still failing: ${problems.join(" ")}`;
+              }
+            } catch {
+              finalOutput = firstOutput;
+              formatWarning =
+                "Formatting repair failed. Showing the first output; check the header and dialogue colors.";
+            }
+          }
+        }
 
         emit({
           type: "status",
@@ -227,6 +277,7 @@ export function createAgenticGenerationStream(
           output: finalOutput,
           usedWebTools,
           toolWarning,
+          formatWarning,
         });
 
         await mcpClient?.close();
