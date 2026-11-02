@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
     "test:integration": "node --experimental-strip-types tests/integration-edit.ts",
-    "eval:edit": "node --experimental-strip-types evals/run-edit-ab.ts"
+    "eval:edit": "node --experimental-strip-types evals/run-edit-ab.ts",
+    "eval:opening-format": "node --experimental-strip-types evals/run-opening-format.ts"
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.18",

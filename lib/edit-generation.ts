@@ -15,6 +15,7 @@ import {
   type EditTarget,
   type SurgicalEdit,
 } from "./edit-content.ts";
+import { hasHeaderLikeLine, hasPresetColors, hasPresetHeader } from "./opening-format.ts";
 
 type EditStreamInput = {
   apiKey: string;
@@ -85,7 +86,15 @@ export function createEditStream(
 
           try {
             const edits = await generate({
-              system: buildEditSystemPrompt(input.target),
+              system: buildEditSystemPrompt(input.target, {
+                presetHeader:
+                  input.target === "opening-message" &&
+                  (hasPresetHeader(input.content) ||
+                    hasHeaderLikeLine(input.content)),
+                presetColors:
+                  input.target === "opening-message" &&
+                  hasPresetColors(input.content),
+              }),
               prompt: buildEditUserPrompt({
                 target: input.target,
                 content: input.content,

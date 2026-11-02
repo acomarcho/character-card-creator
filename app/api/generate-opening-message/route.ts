@@ -3,10 +3,12 @@ import { z } from "zod";
 
 import { createAgenticGenerationStream } from "@/lib/ai-generation";
 import {
+  buildOpeningFormatRepairPrompt,
   buildOpeningMessageSystemPrompt,
   buildOpeningMessageUserPrompt,
   stripAsterisks,
 } from "@/lib/reference-prompts";
+import { validateOpeningFormat } from "@/lib/opening-format";
 
 export const runtime = "nodejs";
 
@@ -19,6 +21,7 @@ const payloadSchema = z.object({
     .trim()
     .min(1, "Generate or paste a character card first."),
   openingContext: z.string().optional(),
+  presetFormatting: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -29,13 +32,21 @@ export async function POST(request: Request) {
     const stream = createAgenticGenerationStream({
       apiKey: payload.deepseekApiKey,
       exaApiKey: payload.exaApiKey,
-      system: buildOpeningMessageSystemPrompt(),
+      system: buildOpeningMessageSystemPrompt({
+        presetFormatting: payload.presetFormatting,
+      }),
       prompt: buildOpeningMessageUserPrompt({
         characterName: payload.characterName,
         characterCard: payload.characterCard,
         openingContext: payload.openingContext,
       }),
       postProcess: stripAsterisks,
+      validate: payload.presetFormatting
+        ? (text: string) => validateOpeningFormat(text).problems
+        : undefined,
+      buildRepairPrompt: payload.presetFormatting
+        ? buildOpeningFormatRepairPrompt
+        : undefined,
     });
 
     return new Response(stream, {
